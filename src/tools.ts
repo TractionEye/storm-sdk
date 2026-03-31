@@ -1,5 +1,4 @@
 import type { StormClient } from './client.js';
-import { AVAILABLE_MARKETS } from './types.js';
 import { StormHttpError } from './http.js';
 
 type Tool = {
@@ -118,9 +117,15 @@ export function createStormTools(client: StormClient): Tool[] {
     {
       name: 'storm_get_available_markets',
       description:
-        'Get the list of supported trading pairs on Storm Trade. Each market has a pair name (e.g. "BTC/USD"), settlement token (TON, USDT, NOT), and type (coinm or base). Use this before opening a position to verify the pair exists. Note: this list may not include all pairs — Storm Trade adds markets over time.',
+        'Get the live list of all trading pairs available on Storm Trade, fetched directly from the Storm API. Each market has a pair name (e.g. "BTC/USD", "ASTER"), settlement token, and base asset. Use this before opening a position to verify the pair exists and get the correct pair name.',
       parameters: { type: 'object', properties: {}, additionalProperties: false },
-      handler: async () => AVAILABLE_MARKETS,
+      handler: async () => {
+        try {
+          return await client.getAvailableMarkets();
+        } catch (err) {
+          return wrapError(err);
+        }
+      },
     },
 
     {

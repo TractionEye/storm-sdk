@@ -11,6 +11,15 @@ export declare class StormClient {
     getStrategyInfo(): Promise<StrategyInfo>;
     getPortfolio(): Promise<PortfolioResponse>;
     /**
+     * Fetch available markets from Storm Trade API.
+     * Filters TON-settlement markets by default.
+     */
+    getAvailableMarkets(): Promise<Array<{
+        pair: string;
+        settlement: string;
+        baseAsset: string;
+    }>>;
+    /**
      * Open a new futures position via /agent/execute.
      * The backend routes to Storm Trade based on strategy protocol.
      */

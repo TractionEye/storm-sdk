@@ -54,6 +54,24 @@ export class StormClient {
     return this.http.get<PortfolioResponse>('/agent/portfolio');
   }
 
+  // ── Markets ──────────────────────────────────────────────────────────────
+
+  /**
+   * Fetch available markets from Storm Trade API.
+   * Filters TON-settlement markets by default.
+   */
+  async getAvailableMarkets(): Promise<Array<{ pair: string; settlement: string; baseAsset: string }>> {
+    logMethodCall('getAvailableMarkets');
+    const res = await fetch('https://api5.storm.tg/api/markets');
+    if (!res.ok) throw new Error(`Storm API error: ${res.status}`);
+    const markets = await res.json() as Array<{ config: { name: string; baseAsset: string; quoteAsset: string; settlementToken: string } }>;
+    return markets.map(m => ({
+      pair: m.config.name,
+      settlement: m.config.settlementToken,
+      baseAsset: m.config.baseAsset,
+    }));
+  }
+
   // ── Trade execution via /agent/execute ───────────────────────────────────
 
   /**
