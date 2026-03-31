@@ -1,0 +1,26 @@
+{
+  "name": "@tractioneye/storm-sdk",
+  "version": "0.1.0",
+  "description": "AI agent SDK for futures trading on Storm Trade via TractionEye",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["ton", "storm-trade", "futures", "trading", "agent", "sdk"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
