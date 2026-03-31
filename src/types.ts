@@ -5,10 +5,26 @@ export interface StormClientConfig {
   baseUrl?: string;
 }
 
+// ─── Strategy info ───────────────────────────────────────────────────────
+
+export interface StrategyInfo {
+  strategy_id: number;
+  strategy_name: string;
+  pnl_day?: number;
+  pnl_week?: number;
+  pnl_month?: number;
+  pnl_year?: number;
+  ton_in_strategy?: number;
+  total_win_rate?: number;
+  trades_per_week?: number;
+  max_drawdown?: number;
+  low_balance_state?: boolean;
+}
+
 // ─── Open position ───────────────────────────────────────────────────────
 
 export interface OpenPositionRequest {
-  /** Margin in nanoTON (1 TON = 1_000_000_000) */
+  /** Collateral (margin deposit) in nanoTON (1 TON = 1_000_000_000) */
   amount: number;
   /** "long" or "short" */
   direction: 'long' | 'short';
@@ -30,16 +46,10 @@ export interface OpenPositionRequest {
   entry_price?: number;
   /** Estimated liquidation price in USD */
   el_price?: number;
-  /** Margin in nanoTON */
+  /** Collateral (margin deposit) in nanoTON — same as amount, required by API */
   margin: number;
   /** Stop price in nanoTON */
   stop_price?: number;
-}
-
-export interface OpenPositionResponse {
-  id: number;
-  error_code: number;
-  error: string;
 }
 
 // ─── Close position ──────────────────────────────────────────────────────
@@ -49,6 +59,12 @@ export interface ClosePositionRequest {
   id: number;
   /** Amount to close in nanoTON (full margin for full close) */
   amount: number;
+}
+
+export interface OpenPositionResponse {
+  id: number;
+  error_code: number;
+  error: string;
 }
 
 export interface ClosePositionResponse {
@@ -93,17 +109,17 @@ export interface Deal {
   entry_price: number;
   stop_loss_price: number;
   take_profit_price: number;
-  deal_type: string;
-  swap_status: string;
+  deal_type: 'market' | 'stopLimit';
+  swap_status: 'pending' | 'confirmed' | 'failed' | 'adjusted';
   opened_at: string;
   closed_at: string | null;
-  profit_or_loss: string | null;
+  profit_or_loss: number | null;
 }
 
 // ─── Order ───────────────────────────────────────────────────────────────
 
 export interface Order {
-  id: string | number;
+  id: number;
   asset: string;
   created_at: string;
   size: number;

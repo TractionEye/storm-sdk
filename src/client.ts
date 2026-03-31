@@ -1,4 +1,5 @@
-import { StormHttpClient } from './http.js';
+import { StormHttpClient, StormHttpError } from './http.js';
+import { logMethodCall } from './logger.js';
 import type {
   StormClientConfig,
   OpenPositionRequest,
@@ -11,46 +12,68 @@ import type {
   Order,
   AggregatedPosition,
   SwapStatus,
+  StrategyInfo,
 } from './types.js';
 
 const DEFAULT_BASE_URL = 'https://test.tractioneye.xyz/trust_api';
 
-type StrategyInfo = {
-  strategy_id: number;
-  strategy_name: string;
-};
-
 export class StormClient {
   private readonly http: StormHttpClient;
   public readonly strategyId: string;
+  public readonly strategyName: string;
 
-  private constructor(http: StormHttpClient, strategyId: string) {
+  private constructor(http: StormHttpClient, strategyId: string, strategyName: string) {
     this.http = http;
     this.strategyId = strategyId;
+    this.strategyName = strategyName;
   }
 
   /**
    * Create a StormClient. Validates the agent token by fetching strategy info.
    */
   static async create(config: StormClientConfig): Promise<StormClient> {
+    if (!config.agentToken) throw new Error('agentToken is required');
     const baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
     const http = new StormHttpClient(baseUrl, config.agentToken);
     const info = await http.get<StrategyInfo>('/agent/strategy');
-    return new StormClient(http, String(info.strategy_id));
+    if (info.strategy_id == null) {
+      throw new Error('Invalid strategy info: missing strategy_id');
+    }
+    return new StormClient(http, String(info.strategy_id), info.strategy_name ?? '');
   }
 
   private path(suffix: string): string {
     return `/strategy/${this.strategyId}${suffix}`;
   }
 
+  // ── Strategy info ────────────────────────────────────────────────────────
+
+  /**
+   * Get strategy summary: balance, PnL, win rate, drawdown.
+   */
+  async getStrategyInfo(): Promise<StrategyInfo> {
+    logMethodCall('getStrategyInfo');
+    return this.http.get<StrategyInfo>('/agent/strategy');
+  }
+
   // ── Positions ────────────────────────────────────────────────────────────
 
   /**
    * Open a new futures position (long or short).
-   * Amount and margin are in nanoTON (1 TON = 1_000_000_000).
-   * Leverage range: 2–100.
+   * `amount` = collateral (margin deposit) in nanoTON.
+   * `margin` = same as amount (collateral). The API uses both fields.
+   * Leverage range: 2–100. Prices: stop_loss/take_profit in USD.
    */
   async openPosition(req: OpenPositionRequest): Promise<OpenPositionResponse> {
+    logMethodCall('openPosition', { direction: req.direction, pair: req.pair, leverage: req.leverage });
+
+    if (req.leverage < 2 || req.leverage > 100) {
+      throw new Error(`Leverage must be between 2 and 100, got ${req.leverage}`);
+    }
+    if (req.amount <= 0) {
+      throw new Error(`Amount must be positive, got ${req.amount}`);
+    }
+
     return this.http.post<OpenPositionResponse>(this.path('/deal/open'), {
       amount: req.amount,
       direction: req.direction,
@@ -73,6 +96,7 @@ export class StormClient {
    * For full close, set amount = full margin of the position.
    */
   async closePosition(req: ClosePositionRequest): Promise<ClosePositionResponse> {
+    logMethodCall('closePosition', { id: req.id, amount: req.amount });
     return this.http.post<ClosePositionResponse>(this.path('/deal/close'), {
       id: req.id,
       amount: req.amount,
@@ -85,6 +109,7 @@ export class StormClient {
    * Create a Take Profit or Stop Loss order for an existing position.
    */
   async createOrder(req: CreateOrderRequest): Promise<CreateOrderResponse> {
+    logMethodCall('createOrder', { order_type: req.order_type, baseAsset: req.baseAsset });
     return this.http.post<CreateOrderResponse>(this.path('/deal/create_order'), {
       order_type: req.order_type,
       marginIn: req.marginIn,
@@ -99,6 +124,7 @@ export class StormClient {
    * Get order history with pagination.
    */
   async getOrders(limit = 20, offset = 0): Promise<Order[]> {
+    logMethodCall('getOrders', { limit, offset });
     return this.http.post<Order[]>(this.path('/orders'), { limit, offset });
   }
 
@@ -108,6 +134,7 @@ export class StormClient {
    * Get open (unclosed) deals for the strategy.
    */
   async getOpenDeals(): Promise<Deal[]> {
+    logMethodCall('getOpenDeals');
     return this.http.get<Deal[]>(this.path('/deals'));
   }
 
@@ -115,6 +142,7 @@ export class StormClient {
    * Get all deals including closed ones.
    */
   async getAllDeals(): Promise<Deal[]> {
+    logMethodCall('getAllDeals');
     return this.http.get<Deal[]>(this.path('/deals/all'));
   }
 
@@ -122,6 +150,7 @@ export class StormClient {
    * Get aggregated positions grouped by token.
    */
   async getAggregatedPositions(): Promise<AggregatedPosition[]> {
+    logMethodCall('getAggregatedPositions');
     return this.http.get<AggregatedPosition[]>(this.path('/deals/aggregated'));
   }
 
@@ -132,11 +161,13 @@ export class StormClient {
    * Statuses: pending → confirmed | failed | adjusted
    */
   async getSwapStatus(dealId: number): Promise<SwapStatus> {
+    logMethodCall('getSwapStatus', { dealId });
     return this.http.get<SwapStatus>(this.path(`/swap/status/${dealId}`));
   }
 
   /**
    * Wait for a deal to reach a terminal status.
+   * Handles transient network errors gracefully (retries within timeout).
    * Polls every `intervalMs` (default 3s), times out after `timeoutMs` (default 120s).
    */
   async waitForConfirmation(
@@ -144,10 +175,24 @@ export class StormClient {
     intervalMs = 3000,
     timeoutMs = 120_000,
   ): Promise<SwapStatus> {
+    logMethodCall('waitForConfirmation', { dealId, intervalMs, timeoutMs });
     const start = Date.now();
+    let consecutiveErrors = 0;
+
     while (Date.now() - start < timeoutMs) {
-      const status = await this.getSwapStatus(dealId);
-      if (status.status !== 'pending') return status;
+      try {
+        const status = await this.getSwapStatus(dealId);
+        consecutiveErrors = 0;
+        if (status.status !== 'pending') return status;
+      } catch (err) {
+        consecutiveErrors++;
+        if (err instanceof StormHttpError && err.status === 404) {
+          throw new Error(`Deal ${dealId} not found`);
+        }
+        if (consecutiveErrors >= 5) {
+          throw new Error(`Too many consecutive errors polling deal ${dealId}: ${err}`);
+        }
+      }
       await new Promise((r) => setTimeout(r, intervalMs));
     }
     throw new Error(`Timeout waiting for deal ${dealId} confirmation after ${timeoutMs}ms`);

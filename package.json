@@ -15,6 +15,7 @@
     "build": "tsc",
     "prepublishOnly": "npm run build"
   },
+  "files": ["dist", "skills"],
   "keywords": ["ton", "storm-trade", "futures", "trading", "agent", "sdk"],
   "license": "MIT",
   "engines": {
